@@ -1,4 +1,4 @@
-# 📊 Enterprise MMM Decision Engine
+#  Enterprise MMM Decision Engine
 
 A production-grade **Marketing Mix Modelling (MMM)** application built with
 [PyMC-Marketing](https://www.pymc-marketing.io/) and [Streamlit](https://streamlit.io/).
