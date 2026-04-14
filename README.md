@@ -28,7 +28,6 @@ You can also view the project demo on LinkedIn:
 
 [Watch the LinkedIn demo post](https://www.linkedin.com/feed/update/urn:li:ugcPost:7449055208715874304/)
 
-> Note: GitHub README files do not support embedded LinkedIn iframe players. This link is the best supported way to share the demo from your LinkedIn post.
 
 ## Project Structure
 
