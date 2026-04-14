@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import streamlit as st
 from config import get_settings
+from utils import reset_app_state
 
 cfg = get_settings()
 
@@ -52,9 +53,8 @@ def render_sidebar() -> None:
             f"- Model trained: {'✅' if has_model else '❌'}"
         )
 
-        if st.button("🗑️ Reset Session", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+        if st.button("🗑️ Reset App", use_container_width=True):
+            reset_app_state()
 
         st.divider()
         st.caption("Built with PyMC-Marketing · Streamlit")

@@ -1,23 +1,24 @@
 """
-Model evaluation: WAIC, LOO-CV, R², MAPE, and posterior predictive checks.
+Model evaluation — compatible with pymc-marketing >= 0.19.
+R², MAPE, RMSE, WAIC, LOO-CV.
 """
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
-import arviz as az
-from pymc_marketing.mmm import MMM
 
-from utils import get_logger
+from config import get_settings
+from utils import get_logger, posterior_mean, predict_array
 
 log = get_logger(__name__)
+cfg_data = get_settings().data
 
 
 def compute_waic(idata) -> Dict[str, float]:
-    """Compute Widely Applicable Information Criterion."""
     try:
+        import arviz as az
         waic = az.waic(idata)
         return {
             "waic": float(waic.waic),
@@ -30,8 +31,8 @@ def compute_waic(idata) -> Dict[str, float]:
 
 
 def compute_loo(idata) -> Dict[str, float]:
-    """Compute Leave-One-Out cross-validation score."""
     try:
+        import arviz as az
         loo = az.loo(idata)
         return {
             "elpd_loo": float(loo.elpd_loo),
@@ -44,46 +45,57 @@ def compute_loo(idata) -> Dict[str, float]:
 
 
 def compute_in_sample_metrics(
-    mmm: MMM, df: pd.DataFrame, target_col: str
+    mmm,
+    df: pd.DataFrame,
+    channel_cols: List[str],
 ) -> Dict[str, float]:
     """
-    Compute R², MAPE, and RMSE on training data.
+    R², MAPE, RMSE on training data using mmm.predict().
 
-    Args:
-        mmm: Fitted MMM instance.
-        df: Training DataFrame.
-        target_col: Name of the target column.
-
-    Returns:
-        Dict with r2, mape, rmse keys.
+    predict() takes X and returns posterior predictions; we extract a mean
+    prediction vector that matches the training periods.
     """
+    target_col = cfg_data.target_col
     try:
-        posterior_pred = mmm.predict(df)
-        y_pred = np.mean(posterior_pred, axis=(0, 1))  # mean over chains/draws
-        y_true = df[target_col].values
+        X = df[["date"] + channel_cols].copy()
+        y_true = df[target_col].values.astype(float)
+
+        pred_arr = predict_array(mmm, X)
+        y_pred = posterior_mean(pred_arr)
+
+        # Align lengths (predict may return all rows incl. future)
+        min_len = min(len(y_true), len(y_pred))
+        y_true, y_pred = y_true[:min_len], y_pred[:min_len]
+
+        valid_mask = np.isfinite(y_true) & np.isfinite(y_pred)
+        if not valid_mask.any():
+            raise ValueError("Model predictions contain no finite values for evaluation.")
+        y_true = y_true[valid_mask]
+        y_pred = y_pred[valid_mask]
 
         ss_res = np.sum((y_true - y_pred) ** 2)
         ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-
+        r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else float("nan")
         mape = float(np.mean(np.abs((y_true - y_pred) / np.where(y_true != 0, y_true, 1e-8))))
         rmse = float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
 
-        metrics = {"r2": float(r2), "mape": mape, "rmse": rmse}
+        metrics = {"r2": r2, "mape": mape, "rmse": rmse}
         log.info("In-sample metrics: %s", metrics)
         return metrics
 
     except Exception as exc:
-        log.warning("In-sample metrics computation failed: %s", exc)
+        log.warning("In-sample metrics failed: %s", exc)
         return {}
 
 
 def full_evaluation_report(
-    mmm: MMM, idata, df: pd.DataFrame, target_col: str
+    mmm,
+    idata,
+    df: pd.DataFrame,
+    channel_cols: List[str],
 ) -> Dict[str, Any]:
-    """Return a combined evaluation report."""
     return {
-        "in_sample": compute_in_sample_metrics(mmm, df, target_col),
+        "in_sample": compute_in_sample_metrics(mmm, df, channel_cols),
         "waic": compute_waic(idata),
         "loo": compute_loo(idata),
     }

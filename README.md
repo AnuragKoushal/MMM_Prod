@@ -69,24 +69,115 @@ mmm_prod/
 
 ## Quickstart
 
-### 1. Clone & install
+### 1. Clone the repository
 
 ```bash
 git clone <your-repo-url>
 cd mmm_prod
-cp .env.example .env          # edit as needed
+```
+
+### 2. Create a virtual environment
+
+Windows PowerShell:
+
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
+macOS / Linux:
+
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. Run the app
+### 4. Create your local environment file
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+macOS / Linux:
+
+```bash
+cp .env.example .env
+```
+
+You can keep the defaults for the first run, or edit `.env` if your input
+column names are different.
+
+### 5. Run the test suite
+
+Recommended quick validation:
+
+```bash
+python -m pytest -q -o addopts=''
+```
+
+If you want to use the repo shortcuts:
+
+```bash
+make test
+```
+
+### 6. Start the Streamlit app
 
 ```bash
 streamlit run app.py
-# or
-make run
 ```
 
-### 3. Upload data
+If `streamlit` is not available on your shell path, use:
+
+```bash
+python -m streamlit run app.py
+```
+
+### 7. Open the app in your browser
+
+After the command starts, Streamlit will print a local URL such as:
+
+```text
+http://localhost:8501
+```
+
+Open that URL in your browser.
+
+### 8. Use the app step by step
+
+1. Go to the `Data` tab.
+2. Upload your CSV or Excel file.
+3. Confirm the raw preview and model-ready preview look correct.
+4. Go to the `Train` tab and click `Train MMM`.
+5. Review the evaluation metrics after training completes.
+6. Open `Insights` to inspect contributions, ROAS, and response curves.
+7. Use `Scenarios` for what-if forecasting.
+8. Use `Optimise` for budget allocation suggestions.
+
+### 9. Reset the app when switching datasets
+
+If you want a completely fresh run, use `Reset App` in the header or sidebar.
+The app also clears stale trained-model artifacts automatically when uploaded
+data changes.
+
+### 10. Stop the app
+
+In the terminal where Streamlit is running, press:
+
+```text
+Ctrl+C
+```
+
+## Input Data Format
 
 Your CSV/Excel file must contain these columns (configurable via `.env`):
 
@@ -116,6 +207,12 @@ TARGET_COL=revenue MCMC_DRAWS=2000 streamlit run app.py
 ```bash
 make test            # full suite with coverage
 make test-fast       # fail-fast, no HTML report
+```
+
+Direct Python command:
+
+```bash
+python -m pytest -q -o addopts=''
 ```
 
 Coverage is reported for all `src/` modules. Minimum threshold: **70%**.

@@ -1,18 +1,22 @@
 """
-Scenario planner: generate and simulate multi-period what-if scenarios.
+Scenario planner — compatible with pymc-marketing >= 0.19.
+mmm.predict() now takes X (date + channel cols only, no target).
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
     from pymc_marketing.mmm import MMM
 
-from utils import get_logger, timer
+from config import get_settings
+from utils import get_logger, posterior_mean, predict_array, prediction_interval, timer
 
 log = get_logger(__name__)
+cfg_data = get_settings().data
 
 
 def generate_scenario(
@@ -21,20 +25,15 @@ def generate_scenario(
     periods: int = 3,
 ) -> pd.DataFrame:
     """
-    Extend the historical DataFrame with *periods* future rows, each
-    modifying channel spends by the supplied multipliers.
+    Extend the historical DataFrame with *periods* future rows.
 
     Args:
-        df: Historical model DataFrame (wide format, must include 'date' col).
-        multipliers: Dict of {channel_col: multiplier}. Channels not listed
-                     are copied unchanged.
-        periods: Number of future periods (months) to simulate.
+        df: Historical wide-format DataFrame (must contain 'date' column).
+        multipliers: {channel_col: multiplier}. Channels not listed are copied.
+        periods: Number of future monthly periods to simulate.
 
     Returns:
         DataFrame containing history + simulated future rows.
-
-    Raises:
-        ValueError: If *periods* < 1 or df is empty.
     """
     if df.empty:
         raise ValueError("Cannot generate scenario from empty DataFrame.")
@@ -43,68 +42,78 @@ def generate_scenario(
 
     scenario_df = df.copy()
 
-    for i in range(1, periods + 1):
+    for _ in range(periods):
         row = scenario_df.iloc[-1].copy()
         row["date"] = row["date"] + pd.DateOffset(months=1)
+        if cfg_data.target_col in row.index:
+            row[cfg_data.target_col] = np.nan
 
         for ch, mult in multipliers.items():
             if ch in row.index:
-                row[ch] = max(0.0, row[ch] * mult)
+                row[ch] = max(0.0, float(row[ch]) * mult)
             else:
-                log.warning("Channel '%s' not found in DataFrame; skipping.", ch)
+                log.warning("Channel '%s' not in DataFrame; skipping.", ch)
 
         scenario_df = pd.concat(
             [scenario_df, pd.DataFrame([row])], ignore_index=True
         )
 
-    log.info(
-        "Generated %d-period scenario. New shape: %s",
-        periods, scenario_df.shape,
-    )
+    log.info("Generated %d-period scenario. Shape: %s", periods, scenario_df.shape)
     return scenario_df
 
 
-def simulate_scenario(mmm: "MMM", scenario_df: pd.DataFrame):
+def simulate_scenario(
+    mmm: "MMM",
+    scenario_df: pd.DataFrame,
+    channel_cols: List[str],
+) -> np.ndarray:
     """
     Run posterior prediction on the scenario DataFrame.
 
     Args:
         mmm: Fitted MMM instance.
-        scenario_df: Scenario DataFrame produced by generate_scenario().
+        scenario_df: Output of generate_scenario().
+        channel_cols: Channel column names (used to build X).
 
     Returns:
-        Raw prediction array (shape: chains × draws × time).
+        Raw prediction array from the MMM model.
     """
+    X = scenario_df[["date"] + channel_cols].copy()
+
     with timer("Scenario simulation"):
-        preds = mmm.predict(scenario_df)
-    log.info("Scenario simulation complete.")
-    return preds
+        pred_arr = predict_array(mmm, X)
+    log.info("Scenario simulation complete. pred shape: %s", pred_arr.shape)
+    return pred_arr
 
 
 def build_scenario_summary(
     scenario_df: pd.DataFrame,
-    preds,
+    preds: np.ndarray,
     target_col: str,
     channel_cols: List[str],
 ) -> pd.DataFrame:
     """
-    Align predictions with scenario rows and return a tidy summary DataFrame.
+    Align predictions with the scenario DataFrame.
 
-    Returns:
-        DataFrame with date, channel spends, actual/predicted target columns.
+    Returns DataFrame with date, channel spends, predicted_mean, p5, p95,
+    and actual target (where available).
     """
-    import numpy as np
+    out = scenario_df[["date"] + channel_cols].copy().reset_index(drop=True)
 
-    pred_mean = np.mean(preds, axis=(0, 1))  # mean over chains and draws
-    pred_p5 = np.percentile(preds, 5, axis=(0, 1))
-    pred_p95 = np.percentile(preds, 95, axis=(0, 1))
+    arr = np.asarray(preds)
+    mean_1d = posterior_mean(arr)
+    p5_1d, p95_1d = prediction_interval(arr, 5, 95)
 
-    out = scenario_df[["date"] + channel_cols].copy()
-    out["predicted_mean"] = pred_mean
-    out["predicted_p5"] = pred_p5
-    out["predicted_p95"] = pred_p95
+    n = min(len(out), len(mean_1d))
+    out["predicted_mean"] = np.nan
+    out["predicted_p5"]   = np.nan
+    out["predicted_p95"]  = np.nan
+    out.loc[:n-1, "predicted_mean"] = mean_1d[:n]
+    out.loc[:n-1, "predicted_p5"]   = p5_1d[:n]
+    out.loc[:n-1, "predicted_p95"]  = p95_1d[:n]
 
     if target_col in scenario_df.columns:
-        out["actual"] = scenario_df[target_col].values
+        actual_values = pd.to_numeric(scenario_df[target_col], errors="coerce").values[:len(out)]
+        out["actual"] = actual_values
 
     return out

@@ -1,32 +1,25 @@
 """
-Posterior diagnostics: trace plots, response curves, predictive checks.
+Posterior diagnostics: trace plots, response curves, predictive checks — v0.19+.
 """
 from __future__ import annotations
 
+import warnings
 import matplotlib.pyplot as plt
 import arviz as az
-from pymc_marketing.mmm import MMM
+import numpy as np
 
 from utils import get_logger
 
 log = get_logger(__name__)
 
 
-def plot_posterior_diagnostics(idata, var_names: list[str] | None = None) -> plt.Figure:
-    """
-    Render ArviZ trace plots for key model parameters.
-
-    Args:
-        idata: ArviZ InferenceData from MMM.fit().
-        var_names: Optional list of variable names to trace. Defaults to all.
-
-    Returns:
-        matplotlib Figure.
-    """
+def plot_posterior_diagnostics(idata, var_names=None) -> plt.Figure:
     try:
-        axes = az.plot_trace(idata, var_names=var_names, compact=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            axes = az.plot_trace(idata, var_names=var_names, compact=True)
         fig = axes.ravel()[0].get_figure()
-        fig.suptitle("Posterior Trace Plots", fontsize=14, fontweight="bold", y=1.01)
+        fig.suptitle("Posterior Trace Plots", fontsize=13, fontweight="bold", y=1.01)
         fig.tight_layout()
         return fig
     except Exception as exc:
@@ -36,47 +29,83 @@ def plot_posterior_diagnostics(idata, var_names: list[str] | None = None) -> plt
         return fig
 
 
-def plot_response_curves(mmm: MMM, figsize: tuple = (12, 6)) -> plt.Figure:
-    """
-    Plot saturation / response curves for each media channel.
-
-    Returns:
-        matplotlib Figure produced by pymc-marketing.
-    """
+def plot_response_curves(mmm, df=None, channel_cols=None, figsize=(12, 6)) -> plt.Figure:
+    """Plot response curves using the installed MMM plotting API."""
     try:
-        fig = mmm.plot_response_curves()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fig = mmm.plot_direct_contribution_curves()
         if fig is None:
-            raise ValueError("plot_response_curves() returned None")
+            raise ValueError("plot_direct_contribution_curves() returned None")
         fig.set_size_inches(*figsize)
         fig.tight_layout()
         return fig
     except Exception as exc:
-        log.warning("Response curve plot failed: %s", exc)
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(0.5, 0.5, f"Response curves unavailable:\n{exc}", ha="center", va="center")
-        return fig
+        log.warning("plot_direct_contribution_curves failed (%s), trying grid.", exc)
+        try:
+            channels = channel_cols or list(getattr(mmm, "channel_columns", []) or [])
+            if not channels:
+                raise ValueError("No channel metadata available for response curve plotting.")
+
+            if df is not None:
+                channel_frame = df[channels].astype(float)
+                values = channel_frame.to_numpy().ravel()
+                values = values[np.isfinite(values) & (values >= 0)]
+                stop = float(values.max()) if values.size else 1.0
+            else:
+                stop = 1.0
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fig = mmm.plot_channel_contribution_grid(start=0.0, stop=max(stop, 1.0), num=50)
+            fig.set_size_inches(*figsize)
+            fig.tight_layout()
+            return fig
+        except Exception as exc2:
+            log.warning("Response curve plot also failed: %s", exc2)
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.text(0.5, 0.5, f"Response curves unavailable:\n{exc2}", ha="center", va="center")
+            return fig
 
 
-def plot_posterior_predictive_check(
-    mmm: MMM,
-    idata,
-    target_col: str,
-    figsize: tuple = (12, 4),
-) -> plt.Figure:
-    """
-    Overlay posterior predictive samples against observed target.
-
-    Returns:
-        matplotlib Figure.
-    """
+def plot_posterior_predictive_check(mmm, idata, target_col=None, df=None, channel_cols=None, figsize=(12, 4)) -> plt.Figure:
     try:
-        axes = az.plot_ppc(idata, observed_rug=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            axes = az.plot_ppc(idata, observed_rug=True)
         fig = axes.ravel()[0].get_figure()
         fig.suptitle("Posterior Predictive Check", fontsize=13, fontweight="bold")
         fig.tight_layout()
         return fig
     except Exception as exc:
         log.warning("PPC plot failed: %s", exc)
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.text(0.5, 0.5, f"PPC unavailable:\n{exc}", ha="center", va="center")
-        return fig
+        try:
+            if df is not None and channel_cols:
+                X = df[["date"] + channel_cols].copy()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    mmm.sample_posterior_predictive(
+                        X=X,
+                        extend_idata=True,
+                        combined=False,
+                        include_last_observations=True,
+                        original_scale=True,
+                    )
+                refreshed_idata = getattr(mmm, "idata", None)
+                if refreshed_idata is not None:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        axes = az.plot_ppc(refreshed_idata, observed_rug=True)
+                    fig = axes.ravel()[0].get_figure()
+                    fig.suptitle("Posterior Predictive Check", fontsize=13, fontweight="bold")
+                    fig.tight_layout()
+                    return fig
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fig = mmm.plot_posterior_predictive()
+            return fig
+        except Exception as exc2:
+            fig, ax = plt.subplots(figsize=figsize)
+            ax.text(0.5, 0.5, f"PPC unavailable:\n{exc2}", ha="center", va="center")
+            return fig
