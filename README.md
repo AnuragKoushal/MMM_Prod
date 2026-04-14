@@ -20,6 +20,16 @@ A production-grade **Marketing Mix Modelling (MMM)** application built with
 
 ---
 
+## Demo
+
+The demo video for this project is available in the repository at `demo/MMM.mp4`.
+
+You can also view it directly here:
+
+[Watch the demo video](demo/MMM.mp4)
+
+> Note: GitHub README files do not reliably support autoplaying embedded MP4 video from the repo. If you want true autoplay behavior, host the demo on a video service such as YouTube or Vimeo and link to that instead.
+
 ## Project Structure
 
 ```
